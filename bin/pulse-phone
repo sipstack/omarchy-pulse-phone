@@ -48,6 +48,35 @@ window_address() {
     ] | first | .address // empty'
 }
 
+window_workspace() {
+  hyprctl clients -j 2>/dev/null | jq -r --arg c "$WM_CLASS" --arg h "$APP_HOST" '
+    [ .[]
+      | select(
+          (.class == $c)
+          or (.class | test("^chrome-" + ($h | gsub("\\."; "\\.")) + "__"; "i"))
+          or (.title == "Pulse Phone")
+        )
+    ] | first | .workspace.name // empty'
+}
+
+# Move a stranded window onto the scratchpad.
+#
+# Toggling the special workspace only does anything if the phone is actually ON
+# it. A window that opened on a normal workspace -- because a rule did not match,
+# or because it predates an upgrade -- leaves the bar icon looking dead: toggle
+# flips an empty scratchpad while the real phone sits elsewhere. So check, and
+# heal it rather than assuming.
+ensure_on_scratchpad() {
+  local addr="$1" ws
+  [[ -z "$addr" ]] && return 0
+  ws="$(window_workspace)"
+  [[ "$ws" == "special:$SPECIAL_WS" ]] && return 0
+
+  hyprctl dispatch movetoworkspacesilent "special:$SPECIAL_WS,address:$addr" >/dev/null 2>&1 || true
+  apply_geometry "$addr"
+  return 0
+}
+
 # Everything about the window that matters, for diagnostics.
 window_info() {
   hyprctl clients -j 2>/dev/null | jq -r --arg c "$WM_CLASS" --arg h "$APP_HOST" '
@@ -208,6 +237,7 @@ cmd_launch() {
        Look for it with: hyprctl clients -j | jq -r '.[].class'"
     apply_geometry "$(window_address)"
   fi
+  ensure_on_scratchpad "$(window_address)"
   reveal
 }
 
@@ -216,6 +246,7 @@ cmd_toggle() {
     cmd_launch
     return
   fi
+  ensure_on_scratchpad "$(window_address)"
   if special_visible; then hide; else reveal; fi
 }
 
@@ -305,6 +336,13 @@ cmd_status() {
     printf 'window   running\n'
     window_info | sed 's/^/         /' 
     printf 'visible  %s\n' "$(special_visible && echo yes || echo no)"
+    local ws
+    ws="$(window_workspace)"
+    if [[ "$ws" != "special:$SPECIAL_WS" ]]; then
+      printf 'scratch  NO — window is on "%s", not "special:%s"\n' "$ws" "$SPECIAL_WS"
+    else
+      printf 'scratch  yes\n'
+    fi
   else
     printf 'window   not running\n'
   fi

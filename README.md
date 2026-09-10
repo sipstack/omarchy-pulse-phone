@@ -112,6 +112,30 @@ Your signed-in session lives in `~/.local/share/pulse-phone` and is left alone.
 Delete that directory to sign out completely. Backups the installer made are
 also left in place.
 
+## Troubleshooting
+
+Start here — it prints the window's real class, title, floating state, size and
+workspace:
+
+```bash
+pulse-phone status
+```
+
+**Clicking the icon does nothing.** The phone is open but stranded on a normal
+workspace, so toggling the scratchpad flips an empty one. `status` shows
+`scratch NO`. Clicking again now heals this automatically; if it persists, run
+`pulse-phone quit` and click once more.
+
+**The phone opens as a full pane.** The window rules are not loading. Check that
+`~/.config/hypr/hyprland.lua` contains `require("hypr.pulse-phone")` and that
+`~/.config/hypr/pulse-phone.lua` exists, then `hyprctl reload`. Geometry is also
+applied imperatively at launch, so a full pane means the require is missing
+*and* the launch path was bypassed.
+
+**No audio on a call.** Confirm the browser is Chromium-family:
+`xdg-settings get default-web-browser`. A GTK/WebKit browser cannot place calls
+at all — `webkit2gtk` has no WebRTC.
+
 ## Known limitations
 
 These are deliberate, not oversights:
