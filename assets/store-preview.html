@@ -1,0 +1,100 @@
+<!-- Generator for assets/store-preview.png.
+     Render with:
+       google-chrome --headless=new --window-size=1400,900 \
+         --force-device-scale-factor=2 --hide-scrollbars \
+         --screenshot=store-preview@2x.png store-preview.html
+     The phone panel is a REAL capture of https://pulse.sipstack.com in dark
+     mode (localStorage @pulse_theme_mode=dark) at 400x780. The bar and
+     backdrop are drawn, which is why the image is captioned an
+     illustration. Replace it with a genuine desktop screenshot when one
+     exists. -->
+<!doctype html><meta charset="utf-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:1400px; height:900px; overflow:hidden; }
+  body {
+    font-family:"CaskaydiaCove Nerd Font Mono","CaskaydiaCove NFM",monospace;
+    background:
+      radial-gradient(900px 520px at 88% -8%, rgba(240,138,108,.20), transparent 62%),
+      radial-gradient(760px 520px at 8% 106%, rgba(86,124,190,.16), transparent 60%),
+      linear-gradient(148deg,#0a0c10 0%,#10141b 46%,#0c1015 100%);
+    position:relative;
+  }
+  /* faint grid so the backdrop reads as an illustration, not a photo */
+  body::before {
+    content:""; position:absolute; inset:0;
+    background-image:linear-gradient(rgba(255,255,255,.020) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(255,255,255,.020) 1px,transparent 1px);
+    background-size:44px 44px;
+  }
+  .bar {
+    position:absolute; top:0; left:0; right:0; height:26px;
+    background:rgba(13,16,21,.94); border-bottom:1px solid rgba(255,255,255,.06);
+    color:#c9cdd4; font-size:12px; display:flex; align-items:center;
+  }
+  .bar .l { position:absolute; left:12px; display:flex; gap:12px; align-items:center; }
+  .bar .c { position:absolute; left:50%; transform:translateX(-50%); display:flex; gap:14px; align-items:center; }
+  .bar .r { position:absolute; right:20px;  display:flex; gap:13px; align-items:center; }
+  .ws { color:#6b727e; }
+  .ws b { color:#e6e9ee; font-weight:600; }
+  /* our widget, absolutely placed so the connector lines up with the panel */
+  .pulse {
+    position:absolute; right:205px; top:3px; width:22px; height:20px;
+    display:flex; align-items:center; justify-content:center;
+    border-radius:5px; background:rgba(240,138,108,.16);
+    box-shadow:0 0 0 1px rgba(240,138,108,.55), 0 0 14px rgba(240,138,108,.30);
+  }
+  .pulse img { width:15px; height:15px; display:block; }
+  .conn {
+    position:absolute; right:215px; top:26px; width:1px; height:14px;
+    background:linear-gradient(rgba(240,138,108,.75),rgba(240,138,108,0));
+  }
+  .panel {
+    position:absolute; right:20px; top:40px; width:400px; height:780px;
+    border-radius:12px; overflow:hidden;
+    box-shadow:0 26px 70px rgba(0,0,0,.62), 0 0 0 1px rgba(255,255,255,.05);
+  }
+  .panel img { width:400px; height:780px; display:block; }
+  .copy { position:absolute; left:62px; top:196px; max-width:520px; }
+  .copy h1 { font-size:46px; line-height:1.1; color:#f2f4f7; font-weight:600; letter-spacing:-.5px; }
+  .copy h1 em { font-style:normal; color:#f08a6c; }
+  .copy p { margin-top:20px; font-size:17px; line-height:1.65; color:#98a0ad; }
+  .copy ul { margin-top:26px; list-style:none; display:flex; flex-direction:column; gap:11px; }
+  .copy li { font-size:15px; color:#b6bdc8; display:flex; gap:11px; align-items:center; }
+  .copy li span.k { color:#f08a6c; width:14px; text-align:center; }
+  .cmd {
+    position:absolute; left:62px; top:600px; width:760px;
+    background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.07);
+    border-radius:8px; padding:15px 18px; font-size:13.5px; color:#aeb6c2;
+    white-space:nowrap; overflow:hidden;
+  }
+  .cmd .p { color:#f08a6c; }
+  .cmd .d { color:#6b727e; }
+  .cap {
+    position:absolute; left:62px; bottom:34px; font-size:11.5px; color:#5b6371; letter-spacing:.3px;
+  }
+</style>
+<div class="bar">
+  <div class="l"><span>󰣇</span><span class="ws"><b>1</b> 2 3</span></div>
+  <div class="c"><span>Wed 14:22</span><span>󰖐 4°</span></div>
+  <div class="r"><span>󰂯</span><span>󰖩</span><span>󰕾</span><span>󰃟</span><span>󰁹</span></div>
+</div>
+<div class="pulse"><img src="icon.png"></div>
+<div class="conn"></div>
+
+<div class="copy">
+  <h1>Your softphone,<br><em>in the bar.</em></h1>
+  <p>SIPSTACK Pulse as an Omarchy scratchpad. Click the icon and a phone-sized
+     window drops in. Click again and it hides &mdash; still registered, so calls
+     still ring.</p>
+  <ul>
+    <li><span class="k">󰏲</span>Calls, SMS and voicemail</li>
+    <li><span class="k">󰄾</span>Click any <b>tel:</b> link to dial</li>
+    <li><span class="k">󰑓</span>Always current &mdash; no separate build</li>
+  </ul>
+</div>
+<div class="cmd">
+  <span class="p">$</span> omarchy plugin add https://github.com/sipstack/omarchy-pulse-phone.git <span class="d">--enable</span>
+</div>
+<div class="panel"><img src="pulse-dark-panel.png"></div>
+<div class="cap">Illustration &middot; Omarchy bar composited with a live Pulse capture</div>
