@@ -125,6 +125,12 @@ These are deliberate, not oversights:
 - **Do Not Disturb silences call notifications.** Omarchy only lets its own
   `omarchy-action` sender and critical `notify-send` messages through DND. The
   phone still rings audibly if it is open.
+- **Omarchy tiles Chromium windows by default.** `default/hypr/apps/browser.lua`
+  tags every Chromium window `chromium-based-browser` and forces `tile = true`
+  on it. `hypr/pulse-phone.lua` drops that tag so the phone can float, the same
+  way Omarchy's own YouTube and Zoom rules do. If the phone ever opens as a full
+  pane, that require line is missing from `hyprland.lua` — `pulse-phone status`
+  will show `floating=false`.
 - **Only one phone window at a time.** A second window would register a second
   SIP contact with the same instance id and silently steal the first one's
   binding. So `dial` raises the existing window and copies the number to your

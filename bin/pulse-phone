@@ -14,6 +14,8 @@ set -euo pipefail
 
 readonly APP_URL="${PULSE_PHONE_URL:-https://pulse.sipstack.com}"
 readonly WM_CLASS="${PULSE_PHONE_CLASS:-pulse-phone}"
+APP_HOST="${APP_URL#*://}"; APP_HOST="${APP_HOST%%/*}"
+readonly APP_HOST
 readonly SPECIAL_WS="pulse"
 readonly PROFILE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/pulse-phone/profile"
 
@@ -28,10 +30,57 @@ need() {
 
 # ---------------------------------------------------------------- window state
 
+# Find the phone window.
+#
+# We cannot rely on the class alone. Chromium honours --class as the X11
+# WM_CLASS, but on Wayland it frequently ignores it and derives the app_id from
+# the URL instead, e.g. "chrome-pulse.sipstack.com__-Default". So match, in
+# order of confidence: our requested class, the Chromium app-mode class shape
+# for our host, then the exact window title the PWA sets.
 window_address() {
-  hyprctl clients -j 2>/dev/null |
-    jq -r --arg c "$WM_CLASS" '.[] | select(.class == $c) | .address' |
-    head -n1
+  hyprctl clients -j 2>/dev/null | jq -r --arg c "$WM_CLASS" --arg h "$APP_HOST" '
+    [ .[]
+      | select(
+          (.class == $c)
+          or (.class | test("^chrome-" + ($h | gsub("\\."; "\\.")) + "__"; "i"))
+          or (.title == "Pulse Phone")
+        )
+    ] | first | .address // empty'
+}
+
+# Everything about the window that matters, for diagnostics.
+window_info() {
+  hyprctl clients -j 2>/dev/null | jq -r --arg c "$WM_CLASS" --arg h "$APP_HOST" '
+    .[] | select(
+      (.class == $c)
+      or (.class | test("^chrome-" + ($h | gsub("\\."; "\\.")) + "__"; "i"))
+      or (.title == "Pulse Phone")
+    ) | "class=\(.class)  title=\(.title)  floating=\(.floating)  size=\(.size[0])x\(.size[1])  ws=\(.workspace.name)  addr=\(.address)"'
+}
+
+# Force the window into a phone-shaped floating panel.
+#
+# The declarative rules in hypr/pulse-phone.lua only fire if the class matches,
+# which is exactly what we cannot guarantee. Acting on the address we just
+# resolved always works, so this is the belt to the rules' braces.
+apply_geometry() {
+  local addr="$1"
+  [[ -z "$addr" ]] && return 0
+
+  local w="${PULSE_PHONE_WIDTH:-400}" h="${PULSE_PHONE_HEIGHT:-780}"
+
+  hyprctl --batch "dispatch setfloating address:$addr ; \
+                   dispatch resizewindowpixel exact $w $h,address:$addr" >/dev/null 2>&1 || true
+
+  # Top-right, clear of the bar. Monitor geometry is in physical pixels, so
+  # divide by scale to get the logical coordinates dispatch expects.
+  local mw mx my
+  read -r mw mx my <<<"$(hyprctl monitors -j 2>/dev/null |
+    jq -r 'first(.[] | select(.focused)) | "\((.width / .scale) | floor) \(.x) \(.y)"')" || return 0
+  [[ -z "${mw:-}" || "$mw" == "null" ]] && return 0
+
+  hyprctl dispatch movewindowpixel "exact $((mx + mw - w - 20)) $((my + 40)),address:$addr" \
+    >/dev/null 2>&1 || true
 }
 
 is_running() {
@@ -154,7 +203,10 @@ cmd_launch() {
   local url="${1:-$APP_URL}"
   if ! is_running; then
     spawn "$url"
-    wait_for_window || die "the phone window never appeared (checked for class '$WM_CLASS')"
+    wait_for_window ||
+      die "the phone window never appeared.
+       Look for it with: hyprctl clients -j | jq -r '.[].class'"
+    apply_geometry "$(window_address)"
   fi
   reveal
 }
@@ -250,7 +302,8 @@ cmd_status() {
   printf 'class    %s\n' "$WM_CLASS"
   printf 'profile  %s\n' "$PROFILE_DIR"
   if is_running; then
-    printf 'window   running (%s)\n' "$(window_address)"
+    printf 'window   running\n'
+    window_info | sed 's/^/         /' 
     printf 'visible  %s\n' "$(special_visible && echo yes || echo no)"
   else
     printf 'window   not running\n'
