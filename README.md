@@ -4,7 +4,23 @@ SIPSTACK Pulse as a scratchpad softphone. A Pulse icon sits in your Omarchy bar;
 click it and a phone-sized window slides in with your dialer, calls, SMS and
 voicemail. Click again and it hides — still registered, so calls still ring.
 
-<!-- TODO: screenshot of the bar icon + the phone panel open -->
+```
+┌─ omarchy bar ──────────────────────────────────────────────────┐
+│  ⌂  1 2 3        Wed 14:22        󰂯  󰖩  󰕾   [󰏲]   ⏻          │
+└─────────────────────────────────────────────│──────────────────┘
+                                    click ───┘
+                             ┌─────────────────────┐
+                             │                     │   400 × 780
+                             │   the Pulse web     │   floating
+                             │   app, unchanged    │   borderless
+                             │                     │   pinned
+                             │                     │   special workspace
+                             └─────────────────────┘   click again to hide
+```
+
+<!-- Before submitting to plugins.omarchy.org, replace the diagram above with a
+     real screenshot: the bar icon plus the phone panel open, on a real
+     Omarchy 4 desktop. Capture it with Omarchy's screenshot binding or `grim`. -->
 
 There is no separate desktop build to keep up to date. The window renders the
 live Pulse web app, so it is always current.
