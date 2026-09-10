@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Pulse Phone
+GenericName=Softphone
+Comment=SIPSTACK Pulse — calls, SMS and voicemail
+Exec=pulse-phone dial %u
+TryExec=pulse-phone
+Icon=pulse-phone
+Terminal=false
+StartupNotify=true
+Categories=Network;Telephony;
+Keywords=phone;softphone;voip;sip;dialer;call;sms;pulse;sipstack;
+MimeType=x-scheme-handler/tel;x-scheme-handler/sip;x-scheme-handler/callto;

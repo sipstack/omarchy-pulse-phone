@@ -1,0 +1,292 @@
+#!/usr/bin/env bash
+#
+# Pulse Phone for Omarchy — launcher, scratchpad toggle and tel:/sip: handler.
+#
+# The "app" is the live Pulse PWA (https://pulse.sipstack.com) rendered in a
+# Chromium --app window sized like a phone. There is no separate Pulse build:
+# the window picks up every PWA deploy automatically.
+#
+# Chromium (not webkit2gtk) is required: webkit2gtk-4.1 ships without
+# ENABLE_WEB_RTC, so RTCPeerConnection does not exist there and SIP calls are
+# impossible. See packages/pulse-mobile/src-tauri/src/main.rs.
+#
+set -euo pipefail
+
+readonly APP_URL="${PULSE_PHONE_URL:-https://pulse.sipstack.com}"
+readonly WM_CLASS="${PULSE_PHONE_CLASS:-pulse-phone}"
+readonly SPECIAL_WS="pulse"
+readonly PROFILE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/pulse-phone/profile"
+
+die() {
+  printf 'pulse-phone: %s\n' "$*" >&2
+  exit 1
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+# ---------------------------------------------------------------- window state
+
+window_address() {
+  hyprctl clients -j 2>/dev/null |
+    jq -r --arg c "$WM_CLASS" '.[] | select(.class == $c) | .address' |
+    head -n1
+}
+
+is_running() {
+  [[ -n "$(window_address)" ]]
+}
+
+# True when the special workspace holding the phone is currently shown on any
+# monitor. `hyprctl monitors` reports the visible special workspace per output.
+special_visible() {
+  hyprctl monitors -j 2>/dev/null |
+    jq -e --arg w "special:$SPECIAL_WS" 'any(.[]; .specialWorkspace.name == $w)' \
+      >/dev/null 2>&1
+}
+
+wait_for_window() {
+  local tries=0
+  until is_running; do
+    tries=$((tries + 1))
+    [[ $tries -gt 100 ]] && return 1
+    sleep 0.15
+  done
+  return 0
+}
+
+# --------------------------------------------------------------------- profile
+
+# A dedicated Chromium profile buys three things:
+#   1. mic + notification permission can be pre-granted for exactly one origin,
+#      so the user never sees a prompt (and we avoid
+#      --use-fake-ui-for-media-stream, which would grant mic to ANY page);
+#   2. the HttpOnly refresh cookie lives somewhere ordinary "clear cookies"
+#      browsing hygiene cannot reach, so the phone stays signed in;
+#   3. the phone window is independent of the user's browser windows.
+seed_profile() {
+  local prefs="$PROFILE_DIR/Default/Preferences"
+  mkdir -p "$PROFILE_DIR/Default"
+
+  # Never touch an existing profile: it holds the live session.
+  [[ -f "$prefs" ]] && return 0
+  command -v jq >/dev/null 2>&1 || return 0
+
+  # Chromium timestamps are microseconds since 1601-01-01.
+  local ts pattern
+  ts=$(((  $(date +%s) + 11644473600 ) * 1000000))
+  pattern="${APP_URL%/},*"
+
+  jq -n --arg p "$pattern" --arg t "$ts" '{
+    profile: {
+      content_settings: {
+        exceptions: {
+          media_stream_mic: { ($p): { last_modified: $t, setting: 1 } },
+          notifications:    { ($p): { last_modified: $t, setting: 1 } }
+        }
+      }
+    }
+  }' >"$prefs" 2>/dev/null || rm -f "$prefs"
+}
+
+# ------------------------------------------------------------------ hypr rules
+
+# The window rules normally live in hypr/pulse-phone.lua, sourced from
+# hyprland.lua by install.sh. But the plugin is installable on its own with
+# `omarchy plugin add`, and without rules the phone opens as an ordinary tiled
+# Chromium window, which is not the product. So apply them at runtime too --
+# `hyprctl keyword` is idempotent, and this makes the zero-install path work.
+#
+# Runtime rules are lost on `hyprctl reload`; install.sh writes the permanent
+# copy. Failure here is non-fatal: worst case the window is tiled.
+ensure_rules() {
+  local applied="${XDG_RUNTIME_DIR:-/tmp}/pulse-phone.rules"
+  [[ -f "$applied" ]] && return 0
+
+  local class="^(${WM_CLASS})$"
+  if hyprctl --batch "\
+    keyword windowrule float,class:${class} ; \
+    keyword windowrule size 400 780,class:${class} ; \
+    keyword windowrule move 100%-420 40,class:${class} ; \
+    keyword windowrule bordersize 0,class:${class} ; \
+    keyword windowrule workspace special:${SPECIAL_WS} silent,class:${class}" \
+    >/dev/null 2>&1; then
+    : >"$applied"
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------- launch
+
+spawn() {
+  local url="$1"
+  need hyprctl
+  need jq
+  command -v omarchy-launch-webapp >/dev/null 2>&1 ||
+    die "omarchy-launch-webapp not found — this needs Omarchy 4 or newer"
+
+  seed_profile
+  ensure_rules
+
+  # omarchy-launch-webapp resolves the default Chromium-family browser and
+  # execs `setsid uwsm-app -- <browser> --app=<url> <extra flags>`, so the
+  # window lands in its own systemd scope. Everything after the URL is
+  # forwarded verbatim.
+  setsid --fork omarchy-launch-webapp "$url" \
+    --class="$WM_CLASS" \
+    --user-data-dir="$PROFILE_DIR" \
+    >/dev/null 2>&1
+}
+
+reveal() {
+  special_visible || hyprctl dispatch togglespecialworkspace "$SPECIAL_WS" >/dev/null
+}
+
+hide() {
+  special_visible && hyprctl dispatch togglespecialworkspace "$SPECIAL_WS" >/dev/null
+  return 0
+}
+
+# ------------------------------------------------------------------- commands
+
+cmd_launch() {
+  local url="${1:-$APP_URL}"
+  if ! is_running; then
+    spawn "$url"
+    wait_for_window || die "the phone window never appeared (checked for class '$WM_CLASS')"
+  fi
+  reveal
+}
+
+cmd_toggle() {
+  if ! is_running; then
+    cmd_launch
+    return
+  fi
+  if special_visible; then hide; else reveal; fi
+}
+
+cmd_quit() {
+  local addr
+  addr="$(window_address)"
+  [[ -z "$addr" ]] && return 0
+  hyprctl dispatch closewindow "address:$addr" >/dev/null
+}
+
+# Handles `tel:`, `sip:` and `callto:` URIs as well as bare numbers.
+#
+# The PWA's dialpad route accepts `?to=` and PRE-FILLS it — it deliberately
+# does not auto-dial, so a stray link cannot place a call. The user still
+# presses the call button.
+cmd_dial() {
+  local raw="${1:-}"
+  # The .desktop entry is `Exec=pulse-phone dial %u`, and %u expands to nothing
+  # when the app is started from the launcher rather than from a tel: link. So
+  # an empty argument means "just open the phone", not a usage error.
+  if [[ -z "$raw" ]]; then
+    cmd_launch
+    return
+  fi
+
+  # Strip the scheme and anything after a separator, keep digits/+/*/#.
+  local number
+  number="${raw#tel:}"
+  number="${number#sip:}"
+  number="${number#callto:}"
+  number="${number%%[;?]*}"
+  number="${number%%@*}"
+  number="$(printf '%s' "$number" | tr -cd '0-9+*#')"
+  [[ -z "$number" ]] && die "no dialable digits in: $raw"
+
+  if is_running; then
+    # A second window would register a SECOND SIP contact with the same
+    # +sip.instance / reg-id and silently steal the binding from the first
+    # (the reason the Tauri shell carries a single-instance guard). So raise
+    # the one window instead and hand the number over via the clipboard.
+    reveal
+    if command -v wl-copy >/dev/null 2>&1; then
+      printf '%s' "$number" | wl-copy
+      notify "Pulse Phone" "$number copied — paste it into the dialpad"
+    else
+      notify "Pulse Phone" "Dial $number"
+    fi
+    return
+  fi
+
+  cmd_launch "${APP_URL%/}/calls/dialpad?to=$(urlencode "$number")"
+}
+
+urlencode() {
+  local s="$1" out="" i c
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      [a-zA-Z0-9.~_-]) out+="$c" ;;
+      *) out+=$(printf '%%%02X' "'$c") ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+notify() {
+  if command -v omarchy-notification-send >/dev/null 2>&1; then
+    omarchy-notification-send --app-name "Pulse Phone" "$1" "$2" >/dev/null 2>&1 || true
+  elif command -v notify-send >/dev/null 2>&1; then
+    notify-send -a "Pulse Phone" "$1" "$2" >/dev/null 2>&1 || true
+  fi
+}
+
+cmd_dialpad() {
+  if is_running; then
+    reveal
+  else
+    cmd_launch "${APP_URL%/}/calls/dialpad"
+  fi
+}
+
+cmd_status() {
+  printf 'url      %s\n' "$APP_URL"
+  printf 'class    %s\n' "$WM_CLASS"
+  printf 'profile  %s\n' "$PROFILE_DIR"
+  if is_running; then
+    printf 'window   running (%s)\n' "$(window_address)"
+    printf 'visible  %s\n' "$(special_visible && echo yes || echo no)"
+  else
+    printf 'window   not running\n'
+  fi
+}
+
+main() {
+  case "${1:-toggle}" in
+    launch) shift; cmd_launch "$@" ;;
+    toggle) cmd_toggle ;;
+    show) cmd_launch ;;
+    hide) hide ;;
+    quit) cmd_quit ;;
+    dial) shift; cmd_dial "$@" ;;
+    dialpad) cmd_dialpad ;;
+    status) cmd_status ;;
+    -h | --help | help)
+      cat <<'USAGE'
+pulse-phone — SIPSTACK Pulse as an Omarchy scratchpad phone
+
+  pulse-phone [toggle]        show/hide the phone (launches it if needed)
+  pulse-phone show            launch if needed, then show
+  pulse-phone hide            hide without quitting (keeps SIP registered)
+  pulse-phone launch [url]    launch at a specific URL
+  pulse-phone dialpad         show the phone on the dialpad
+  pulse-phone dial <number>   open the dialpad pre-filled; handles tel:/sip:
+  pulse-phone quit            close the window (drops the SIP registration)
+  pulse-phone status          print what it thinks is going on
+
+Environment:
+  PULSE_PHONE_URL    override the app URL (default https://pulse.sipstack.com)
+  PULSE_PHONE_CLASS  override the window class (default pulse-phone)
+USAGE
+      ;;
+    *) die "unknown command: $1 (try --help)" ;;
+  esac
+}
+
+main "$@"

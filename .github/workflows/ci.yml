@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: shellcheck install.sh bin/pulse-phone
+
+      - name: manifest is valid JSON and declares what Omarchy requires
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          m = json.load(open("manifest.json"))
+          required = ["schemaVersion", "id", "name", "version", "kinds", "entryPoints"]
+          missing = [k for k in required if k not in m]
+          assert not missing, f"manifest.json missing: {missing}"
+          assert not m["id"].startswith("omarchy."), "the omarchy.* namespace is reserved"
+          entry = m["entryPoints"]["barWidget"]
+          import os
+          assert os.path.isfile(entry), f"entryPoint {entry} does not exist"
+          print(f"manifest ok: {m['id']} v{m['version']} -> {entry}")
+          PY
+
+      - name: desktop entry validates
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq desktop-file-utils
+          desktop-file-validate desktop/pulse-phone.desktop
+
+      - name: installer is idempotent and refuses a non-Omarchy host
+        run: |
+          # No omarchy-shell on a CI runner, so preflight must fail cleanly
+          # rather than half-installing.
+          if ./install.sh; then echo "expected preflight to fail"; exit 1; fi
+          ./install.sh 2>&1 | grep -q "Omarchy 4 or newer"
+          echo "preflight refuses non-Omarchy hosts"

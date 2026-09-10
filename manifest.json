@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "com.sipstack.pulse-phone",
+  "name": "Pulse Phone",
+  "version": "1.0.0",
+  "author": "SIPSTACK",
+  "license": "MIT",
+  "description": "SIPSTACK Pulse softphone as an Omarchy scratchpad — calls, SMS and voicemail in a phone-sized window you toggle from the bar.",
+  "homepage": "https://www.sipstack.com/products/pulse",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Pulse Phone",
+    "category": "Communication",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
