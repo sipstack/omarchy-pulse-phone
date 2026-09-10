@@ -48,6 +48,17 @@ window_address() {
     ] | first | .address // empty'
 }
 
+window_floating() {
+  hyprctl clients -j 2>/dev/null | jq -r --arg c "$WM_CLASS" --arg h "$APP_HOST" '
+    [ .[]
+      | select(
+          (.class == $c)
+          or (.class | test("^chrome-" + ($h | gsub("\\."; "\\.")) + "__"; "i"))
+          or (.title == "Pulse Phone")
+        )
+    ] | first | .floating // empty'
+}
+
 window_workspace() {
   hyprctl clients -j 2>/dev/null | jq -r --arg c "$WM_CLASS" --arg h "$APP_HOST" '
     [ .[]
@@ -72,7 +83,8 @@ ensure_on_scratchpad() {
   ws="$(window_workspace)"
   [[ "$ws" == "special:$SPECIAL_WS" ]] && return 0
 
-  hyprctl dispatch movetoworkspacesilent "special:$SPECIAL_WS,address:$addr" >/dev/null 2>&1 || true
+  hypr_dispatch "hl.dsp.window.move({ window = \"address:$addr\", workspace = \"special:$SPECIAL_WS\", follow = false })" \
+    movetoworkspacesilent "special:$SPECIAL_WS,address:$addr" || true
   apply_geometry "$addr"
   return 0
 }
@@ -96,20 +108,29 @@ apply_geometry() {
   local addr="$1"
   [[ -z "$addr" ]] && return 0
 
+  local win="address:$addr"
   local w="${PULSE_PHONE_WIDTH:-400}" h="${PULSE_PHONE_HEIGHT:-780}"
 
-  hyprctl --batch "dispatch setfloating address:$addr ; \
-                   dispatch resizewindowpixel exact $w $h,address:$addr" >/dev/null 2>&1 || true
+  # `float` is a TOGGLE, so only fire it when the window is actually tiled --
+  # otherwise we would un-float a window the Lua rules already got right.
+  if [[ "$(window_floating)" != "true" ]]; then
+    hypr_dispatch "hl.dsp.window.float({ window = \"$win\", action = \"toggle\" })" \
+      togglefloating "$win" || true
+  fi
 
-  # Top-right, clear of the bar. Monitor geometry is in physical pixels, so
-  # divide by scale to get the logical coordinates dispatch expects.
+  hypr_dispatch "hl.dsp.window.resize({ window = \"$win\", x = $w, y = $h })" \
+    resizeactive exact "$w" "$h" "$win" || true
+
+  # Top-right, clear of the bar. Monitor geometry is physical pixels, so divide
+  # by scale for the logical coordinates dispatch expects.
   local mw mx my
   read -r mw mx my <<<"$(hyprctl monitors -j 2>/dev/null |
     jq -r 'first(.[] | select(.focused)) | "\((.width / .scale) | floor) \(.x) \(.y)"')" || return 0
-  [[ -z "${mw:-}" || "$mw" == "null" ]] && return 0
-
-  hyprctl dispatch movewindowpixel "exact $((mx + mw - w - 20)) $((my + 40)),address:$addr" \
-    >/dev/null 2>&1 || true
+  if [[ -n "${mw:-}" && "$mw" != "null" ]]; then
+    hypr_dispatch "hl.dsp.window.move({ window = \"$win\", x = $((mx + mw - w - 20)), y = $((my + 40)) })" \
+      moveactive exact "$((mx + mw - w - 20))" "$((my + 40))" "$win" || true
+  fi
+  return 0
 }
 
 is_running() {
@@ -168,6 +189,30 @@ seed_profile() {
   }' >"$prefs" 2>/dev/null || rm -f "$prefs"
 }
 
+# ------------------------------------------------------------------- dispatch
+
+# Hyprland 0.56 (Omarchy 4) renamed its dispatchers to a Lua form; the classic
+# names return an error. Every script in Omarchy therefore tries the new form
+# and falls back to the old one -- see bin/omarchy-hyprland-window-pop, whose
+# helper this mirrors.
+#
+# Unlike Omarchy's, this one COMPLAINS when both forms fail. Swallowing that is
+# what made three bugs here invisible: the window looked configured because the
+# declarative rules had done the work, while every dispatch silently no-op'd.
+hypr_dispatch() {
+  local lua="$1"
+  shift
+  hyprctl dispatch "$lua" >/dev/null 2>&1 && return 0
+  hyprctl dispatch "$@" >/dev/null 2>&1 && return 0
+  printf 'pulse-phone: hyprctl rejected both dispatch forms: %s | %s\n' "$lua" "$*" >&2
+  return 1
+}
+
+toggle_special() {
+  hypr_dispatch "hl.dsp.workspace.toggle_special(\"$SPECIAL_WS\")" \
+    togglespecialworkspace "$SPECIAL_WS"
+}
+
 # ------------------------------------------------------------------ hypr rules
 
 # The window rules normally live in hypr/pulse-phone.lua, sourced from
@@ -218,11 +263,12 @@ spawn() {
 }
 
 reveal() {
-  special_visible || hyprctl dispatch togglespecialworkspace "$SPECIAL_WS" >/dev/null
+  special_visible || toggle_special
+  return 0
 }
 
 hide() {
-  special_visible && hyprctl dispatch togglespecialworkspace "$SPECIAL_WS" >/dev/null
+  if special_visible; then toggle_special; fi
   return 0
 }
 
@@ -254,7 +300,8 @@ cmd_quit() {
   local addr
   addr="$(window_address)"
   [[ -z "$addr" ]] && return 0
-  hyprctl dispatch closewindow "address:$addr" >/dev/null
+  hypr_dispatch "hl.dsp.window.close({ window = \"address:$addr\" })" \
+    closewindow "address:$addr"
 }
 
 # Handles `tel:`, `sip:` and `callto:` URIs as well as bare numbers.
